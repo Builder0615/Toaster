@@ -2,7 +2,6 @@ package com.hjq.toast.demo;
 
 import android.content.Intent;
 import android.graphics.Insets;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
@@ -10,16 +9,18 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.View.OnApplyWindowInsetsListener;
 import android.view.WindowInsets;
+import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.material.snackbar.Snackbar;
-import com.hjq.bar.OnTitleBarListener;
 import com.hjq.bar.TitleBar;
 import com.hjq.permissions.XXPermissions;
 import com.hjq.permissions.permission.PermissionLists;
+import com.hjq.toast.config.ILoadingToastStyle;
 import com.hjq.toast.ToastParams;
 import com.hjq.toast.ToastStrategy;
 import com.hjq.toast.Toaster;
+import com.hjq.toast.style.BlackLoadingToastStyle;
 import com.hjq.toast.style.BlackToastStyle;
 import com.hjq.toast.style.CustomToastStyle;
 import com.hjq.toast.style.WhiteToastStyle;
@@ -39,14 +40,7 @@ public final class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         TitleBar titleBar = findViewById(R.id.tb_main_bar);
-        titleBar.setOnTitleBarListener(new OnTitleBarListener() {
-            @Override
-            public void onTitleClick(TitleBar titleBar) {
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setData(Uri.parse(titleBar.getTitle().toString()));
-                startActivity(intent);
-            }
-        });
+        titleBar.setTitle(R.string.app_name);
 
         // 适配 Android 15 EdgeToEdge 特性
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
@@ -100,8 +94,100 @@ public final class MainActivity extends AppCompatActivity {
 
     public void startActivityShowToast(View v) {
         Toaster.show(R.string.demo_show_toast_result);
-        startActivity(new Intent(this, MainActivity.class));
+        startActivity(getIntent());
         finish();
+    }
+
+    public void showLoadingToast(View v) {
+        Toaster.showLoading(R.string.demo_show_loading_toast_result, 5000);
+    }
+
+    public void showLoadingWithoutText(View v) {
+        Toaster.showLoading((CharSequence) null, 3000);
+    }
+
+    public void showCustomLoadingToast(View v) {
+        ToastParams params = new ToastParams();
+        params.loading = true;
+        params.text = getString(R.string.demo_show_custom_loading_toast_result);
+        params.duration = ToastParams.DURATION_INFINITE;
+        params.timeoutMillis = 5000;
+        params.showMask = true;
+        params.maskColor = 0x7F0F172A;
+        params.style = new ILoadingToastStyle<View>() {
+
+            private final CustomToastStyle delegate = new CustomToastStyle(R.layout.toast_loading);
+
+            @Override
+            public View createView(android.content.Context context) {
+                return delegate.createView(context);
+            }
+
+            @Override
+            public int getGravity() {
+                return delegate.getGravity();
+            }
+
+            @Override
+            public int getXOffset() {
+                return delegate.getXOffset();
+            }
+
+            @Override
+            public int getYOffset() {
+                return delegate.getYOffset();
+            }
+
+            @Override
+            public float getHorizontalMargin() {
+                return delegate.getHorizontalMargin();
+            }
+
+            @Override
+            public float getVerticalMargin() {
+                return delegate.getVerticalMargin();
+            }
+
+            @Override
+            public void applyLoading(View view, CharSequence text) {
+                TextView messageView = view.findViewById(android.R.id.message);
+                if (messageView == null) {
+                    return;
+                }
+                if (text == null || text.length() == 0) {
+                    messageView.setVisibility(View.GONE);
+                    return;
+                }
+                messageView.setVisibility(View.VISIBLE);
+                messageView.setText(text);
+            }
+        };
+        Toaster.show(params);
+    }
+
+    public void dismissLoadingToast(View v) {
+        Toaster.dismiss();
+    }
+
+    public void switchLoadingStyle(View v) {
+        Toaster.setLoadingStyle(new BlackLoadingToastStyle() {
+            @Override
+            protected int getTextColor(android.content.Context context) {
+                return 0xFF1E293B;
+            }
+
+            @Override
+            protected android.graphics.drawable.Drawable getBackgroundDrawable(android.content.Context context) {
+                android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
+                drawable.setColor(0xFFF8FAFC);
+                drawable.setCornerRadius(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
+                    14, context.getResources().getDisplayMetrics()));
+                drawable.setStroke((int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
+                    1, context.getResources().getDisplayMetrics()), 0xFFCBD5E1);
+                return drawable;
+            }
+        });
+        Toaster.showLoading(R.string.demo_switch_loading_style_result, 5000);
     }
 
     public void switchToastStyleToWhite(View v) {

@@ -11,8 +11,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.view.View;
 import android.widget.Toast;
 import com.hjq.toast.config.IToast;
+import com.hjq.toast.config.ILoadingToastStyle;
 import com.hjq.toast.config.IToastStrategy;
 import com.hjq.toast.config.IToastStyle;
 import java.lang.ref.WeakReference;
@@ -88,7 +90,17 @@ public class ToastStrategy implements IToastStrategy {
         final Activity toastActivity = getToastActivity();
 
         IToast toast;
-        if ((params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
+        if (params.loading &&
+            (params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
+                params.priorityType == ToastParams.PRIORITY_TYPE_GLOBAL) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            Settings.canDrawOverlays(application)) {
+            toast = new GlobalToast(application);
+        } else if (params.loading && toastActivity != null &&
+            (params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
+                params.priorityType == ToastParams.PRIORITY_TYPE_LOCAL)) {
+            toast = new ActivityToast(toastActivity);
+        } else if ((params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
             params.priorityType == ToastParams.PRIORITY_TYPE_GLOBAL) &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             Settings.canDrawOverlays(application)) {
@@ -116,6 +128,16 @@ public class ToastStrategy implements IToastStrategy {
         }
         if (areSupportCustomToastStyle(toast) || !onlyShowSystemToastStyle()) {
             diyToastStyle(toast, params.style);
+        }
+        if (toast instanceof CustomToast) {
+            CustomToast customToast = (CustomToast) toast;
+            customToast.setTimeoutMillis(params.timeoutMillis);
+            if (params.loading) {
+                customToast.setFillScreen(true);
+                customToast.setShowMask(params.showMask);
+                customToast.setMaskColor(params.maskColor);
+                customToast.setInterceptBack(params.interceptBack);
+            }
         }
         return toast;
     }
@@ -264,10 +286,24 @@ public class ToastStrategy implements IToastStrategy {
             // 为什么用 WeakReference，而不用 SoftReference ？
             // https://github.com/getActivity/Toaster/issues/79
             mToastReference = new WeakReference<>(toast);
-            toast.setDuration(mToastParams.duration);
-            toast.setText(mToastParams.text);
+            if (mToastParams.loading && !(toast instanceof CustomToast) &&
+                mToastParams.duration == ToastParams.DURATION_INFINITE) {
+                toast.setDuration(Toast.LENGTH_LONG);
+            } else {
+                toast.setDuration(mToastParams.duration);
+            }
+            applyToastContent(toast, mToastParams);
             toast.show();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyToastContent(IToast toast, ToastParams params) {
+        if (params.loading && params.style instanceof ILoadingToastStyle && toast.getView() != null) {
+            ((ILoadingToastStyle<View>) params.style).applyLoading(toast.getView(), params.text);
+            return;
+        }
+        toast.setText(params.text);
     }
 
     /**

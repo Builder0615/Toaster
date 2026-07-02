@@ -25,6 +25,8 @@ public class ToastLogInterceptor implements IToastInterceptor {
             return;
         }
 
+        String message = text == null ? "" : text.toString();
+
         // 获取调用的堆栈信息
         StackTraceElement[] stackTraces = new Throwable().getStackTrace();
         for (StackTraceElement stackTrace : stackTraces) {
@@ -39,7 +41,7 @@ public class ToastLogInterceptor implements IToastInterceptor {
             try {
                 Class<?> clazz = Class.forName(className);
                 if (!filterClass(clazz)) {
-                    printLog("(" + stackTrace.getFileName() + ":" + lineNumber + ") " + text.toString());
+                    printLog("(" + stackTrace.getFileName() + ":" + lineNumber + ") " + message);
                     // 跳出循环
                     break;
                 }

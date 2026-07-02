@@ -13,7 +13,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         app:leftIcon="@null"
-        app:title="https://github.com/getActivity/Toaster" />
+        app:title="@string/app_name" />
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
@@ -53,6 +53,46 @@
                     android:layout_marginTop="10dp"
                     android:onClick="showLongToast"
                     android:text="@string/demo_show_long_toast" />
+
+                <Button
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="10dp"
+                    android:onClick="showLoadingToast"
+                    android:text="@string/demo_show_loading_toast" />
+
+                <Button
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="10dp"
+                    android:onClick="showLoadingWithoutText"
+                    android:text="@string/demo_show_loading_without_text" />
+
+                <Button
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="10dp"
+                    android:onClick="showCustomLoadingToast"
+                    android:text="@string/demo_show_custom_loading_toast" />
+
+                <Button
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="10dp"
+                    android:onClick="dismissLoadingToast"
+                    android:text="@string/demo_dismiss_loading_toast" />
+
+                <Button
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="10dp"
+                    android:onClick="switchLoadingStyle"
+                    android:text="@string/demo_switch_loading_style" />
 
                 <Button
                     android:layout_width="wrap_content"

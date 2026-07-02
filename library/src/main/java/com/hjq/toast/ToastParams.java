@@ -12,6 +12,9 @@ import com.hjq.toast.config.IToastStyle;
  */
 public class ToastParams {
 
+    /** 无限时长：仅自定义 Toast 支持，系统 Toast 会降级成普通长 Toast */
+    public static final int DURATION_INFINITE = -2;
+
     /** 优先级类型：框架默认选择最优方案来显示，具体实现可以看一下 {@link ToastStrategy#createToast(ToastParams)} */
     public static final int PRIORITY_TYPE_DEFAULT = 0;
     /** 优先级类型：优先使用全局级 Toast 来显示（显示在所有应用上面，可能需要通知栏权限或者悬浮窗权限） */
@@ -21,6 +24,18 @@ public class ToastParams {
 
     /** 显示的文本 */
     public CharSequence text;
+
+    /** 是否作为 Loading 显示 */
+    public boolean loading;
+
+    /** Loading 是否显示遮罩 */
+    public boolean showMask = true;
+
+    /** Loading 遮罩颜色 */
+    public int maskColor = 0x66000000;
+
+    /** Loading 是否拦截返回 */
+    public boolean interceptBack = true;
 
     /**
      * Toast 显示时长，有两种值可选
@@ -32,6 +47,9 @@ public class ToastParams {
 
     /** 延迟显示时间 */
     public long delayMillis = 0;
+
+    /** 超时自动关闭时间，单位毫秒，0 表示不自动关闭 */
+    public long timeoutMillis = 0;
 
     /** 优先级类型 */
     public int priorityType = PRIORITY_TYPE_DEFAULT;

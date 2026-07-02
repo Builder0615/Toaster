@@ -4,9 +4,11 @@ import android.app.Application;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
 import android.widget.Toast;
+import com.hjq.toast.config.ILoadingToastStyle;
 import com.hjq.toast.config.IToastInterceptor;
 import com.hjq.toast.config.IToastStrategy;
 import com.hjq.toast.config.IToastStyle;
+import com.hjq.toast.style.BlackLoadingToastStyle;
 import com.hjq.toast.style.BlackToastStyle;
 import com.hjq.toast.style.CustomToastStyle;
 import com.hjq.toast.style.LocationToastStyle;
@@ -29,6 +31,9 @@ public final class Toaster {
 
     /** Toast 样式 */
     private static IToastStyle<?> sToastStyle;
+
+    /** Loading Toast 样式 */
+    private static ILoadingToastStyle<?> sLoadingToastStyle;
 
     /** Toast 拦截器（可空） */
     private static IToastInterceptor sToastInterceptor;
@@ -190,11 +195,51 @@ public final class Toaster {
         show(params);
     }
 
+    /**
+     * 显示 Loading Toast
+     */
+    public static void showLoading() {
+        showLoading((CharSequence) null);
+    }
+
+    public static void showLoading(int id) {
+        showLoading(stringIdToCharSequence(id));
+    }
+
+    public static void showLoading(Object object) {
+        showLoading(objectToCharSequence(object));
+    }
+
+    public static void showLoading(CharSequence text) {
+        ToastParams params = new ToastParams();
+        params.loading = true;
+        params.text = text;
+        params.duration = ToastParams.DURATION_INFINITE;
+        show(params);
+    }
+
+    public static void showLoading(int id, long timeoutMillis) {
+        showLoading(stringIdToCharSequence(id), timeoutMillis);
+    }
+
+    public static void showLoading(Object object, long timeoutMillis) {
+        showLoading(objectToCharSequence(object), timeoutMillis);
+    }
+
+    public static void showLoading(CharSequence text, long timeoutMillis) {
+        ToastParams params = new ToastParams();
+        params.loading = true;
+        params.text = text;
+        params.duration = ToastParams.DURATION_INFINITE;
+        params.timeoutMillis = timeoutMillis;
+        show(params);
+    }
+
     public static void show(ToastParams params) {
         checkInitStatus();
 
-        // 如果是空对象或者空文本就不显示
-        if (params.text == null || params.text.length() == 0) {
+        // 非 Loading Toast 空文本不显示
+        if (!params.loading && (params.text == null || params.text.length() == 0)) {
             return;
         }
 
@@ -210,11 +255,15 @@ public final class Toaster {
         }
 
         if (params.style == null) {
-            params.style = sToastStyle;
+            params.style = params.loading ? getLoadingStyle() : sToastStyle;
         }
 
         if (params.interceptor.intercept(params)) {
             return;
+        }
+
+        if (params.loading && params.duration == -1) {
+            params.duration = ToastParams.DURATION_INFINITE;
         }
 
         if (params.duration == -1) {
@@ -229,6 +278,13 @@ public final class Toaster {
      */
     public static void cancel() {
         sToastStrategy.cancelToast();
+    }
+
+    /**
+     * 关闭当前 Toast / Loading
+     */
+    public static void dismiss() {
+        cancel();
     }
 
     /**
@@ -279,6 +335,23 @@ public final class Toaster {
 
     public static IToastStyle<?> getStyle() {
         return sToastStyle;
+    }
+
+    /**
+     * 设置 Loading Toast 样式
+     */
+    public static void setLoadingStyle(ILoadingToastStyle<?> style) {
+        if (style == null) {
+            return;
+        }
+        sLoadingToastStyle = style;
+    }
+
+    public static ILoadingToastStyle<?> getLoadingStyle() {
+        if (sLoadingToastStyle == null) {
+            sLoadingToastStyle = new BlackLoadingToastStyle();
+        }
+        return sLoadingToastStyle;
     }
 
     /**

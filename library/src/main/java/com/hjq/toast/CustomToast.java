@@ -37,6 +37,16 @@ public abstract class CustomToast implements IToast {
     private int mShortDuration = 2000;
     /** 长吐司显示的时长，参考至 NotificationManagerService.LONG_DELAY */
     private int mLongDuration = 3500;
+    /** 是否全屏承载 */
+    private boolean mFillScreen;
+    /** 是否显示遮罩 */
+    private boolean mShowMask;
+    /** 遮罩颜色 */
+    private int mMaskColor;
+    /** 是否拦截返回 */
+    private boolean mInterceptBack;
+    /** 自动关闭时长 */
+    private long mTimeoutMillis;
 
     public CustomToast(Context context) {
         mContext = context;
@@ -148,5 +158,45 @@ public abstract class CustomToast implements IToast {
 
     public int getLongDuration() {
         return mLongDuration;
+    }
+
+    public void setFillScreen(boolean fillScreen) {
+        mFillScreen = fillScreen;
+    }
+
+    public boolean isFillScreen() {
+        return mFillScreen;
+    }
+
+    public void setShowMask(boolean showMask) {
+        mShowMask = showMask;
+    }
+
+    public boolean isShowMask() {
+        return mShowMask;
+    }
+
+    public void setMaskColor(int maskColor) {
+        mMaskColor = maskColor;
+    }
+
+    public int getMaskColor() {
+        return mMaskColor;
+    }
+
+    public void setInterceptBack(boolean interceptBack) {
+        mInterceptBack = interceptBack;
+    }
+
+    public boolean isInterceptBack() {
+        return mInterceptBack;
+    }
+
+    public void setTimeoutMillis(long timeoutMillis) {
+        mTimeoutMillis = timeoutMillis;
+    }
+
+    public long getTimeoutMillis() {
+        return mTimeoutMillis;
     }
 }

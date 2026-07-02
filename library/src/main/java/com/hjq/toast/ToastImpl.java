@@ -4,11 +4,16 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
@@ -40,6 +45,16 @@ final class ToastImpl {
 
     /** 当前是否全局显示 */
     private boolean mGlobalShow;
+
+    /** 实际添加到 WindowManager 的 View */
+    private View mWindowView;
+
+    private final Runnable mAutoCancelRunnable = new Runnable() {
+        @Override
+        public void run() {
+            cancel();
+        }
+    };
 
     ToastImpl(Activity activity, CustomToast toast) {
         this((Context) activity, toast);
@@ -89,6 +104,7 @@ final class ToastImpl {
             return;
         }
         HANDLER.removeCallbacks(mShowRunnable);
+        HANDLER.removeCallbacks(mAutoCancelRunnable);
         if (isMainThread()) {
             mCancelRunnable.run();
         } else {
@@ -142,18 +158,22 @@ final class ToastImpl {
             }
 
             final WindowManager.LayoutParams params = new WindowManager.LayoutParams();
-            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            params.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.height = mToast.isFillScreen() ? WindowManager.LayoutParams.MATCH_PARENT : WindowManager.LayoutParams.WRAP_CONTENT;
+            params.width = mToast.isFillScreen() ? WindowManager.LayoutParams.MATCH_PARENT : WindowManager.LayoutParams.WRAP_CONTENT;
             params.format = PixelFormat.TRANSLUCENT;
-            params.flags = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                    | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            params.flags = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+            if (!mToast.isFillScreen() || !mToast.isInterceptBack()) {
+                params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+            }
+            if (!mToast.isFillScreen()) {
+                params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            }
             params.packageName = mPackageName;
-            params.gravity = mToast.getGravity();
-            params.x = mToast.getXOffset();
-            params.y = mToast.getYOffset();
-            params.verticalMargin = mToast.getVerticalMargin();
-            params.horizontalMargin = mToast.getHorizontalMargin();
+            params.gravity = mToast.isFillScreen() ? Gravity.START | Gravity.TOP : mToast.getGravity();
+            params.x = mToast.isFillScreen() ? 0 : mToast.getXOffset();
+            params.y = mToast.isFillScreen() ? 0 : mToast.getYOffset();
+            params.verticalMargin = mToast.isFillScreen() ? 0 : mToast.getVerticalMargin();
+            params.horizontalMargin = mToast.isFillScreen() ? 0 : mToast.getHorizontalMargin();
             params.windowAnimations = mToast.getAnimationsId();
             params.setTitle(WINDOW_TITLE);
 
@@ -181,10 +201,17 @@ final class ToastImpl {
             }
 
             try {
-                windowManager.addView(mToast.getView(), params);
+                mWindowView = createWindowView();
+                windowManager.addView(mWindowView, params);
+                if (mWindowView.isFocusable()) {
+                    mWindowView.requestFocus();
+                }
                 // 添加一个移除吐司的任务
-                HANDLER.postDelayed(() -> cancel(), mToast.getDuration() == Toast.LENGTH_LONG ?
-                        mToast.getLongDuration() : mToast.getShortDuration());
+                HANDLER.removeCallbacks(mAutoCancelRunnable);
+                long autoCancelDelay = generateAutoCancelDelay();
+                if (autoCancelDelay > 0) {
+                    HANDLER.postDelayed(mAutoCancelRunnable, autoCancelDelay);
+                }
                 // 注册生命周期管控
                 mWindowLifecycle.register(ToastImpl.this);
                 // 当前已经显示
@@ -203,6 +230,50 @@ final class ToastImpl {
         }
     };
 
+    private long generateAutoCancelDelay() {
+        if (mToast.getTimeoutMillis() > 0) {
+            return mToast.getTimeoutMillis();
+        }
+        if (mToast.getDuration() == Toast.LENGTH_LONG) {
+            return mToast.getLongDuration();
+        }
+        if (mToast.getDuration() == Toast.LENGTH_SHORT) {
+            return mToast.getShortDuration();
+        }
+        return 0;
+    }
+
+    private View createWindowView() {
+        View contentView = mToast.getView();
+        if (!mToast.isFillScreen()) {
+            return contentView;
+        }
+
+        FrameLayout container = new FrameLayout(mToast.getContext());
+        container.setLayoutParams(new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        container.setBackgroundColor(mToast.isShowMask() ? mToast.getMaskColor() : Color.TRANSPARENT);
+        container.setClickable(true);
+
+        if (mToast.isInterceptBack()) {
+            container.setFocusable(true);
+            container.setFocusableInTouchMode(true);
+            container.setOnKeyListener(new View.OnKeyListener() {
+                @Override
+                public boolean onKey(View v, int keyCode, KeyEvent event) {
+                    return keyCode == KeyEvent.KEYCODE_BACK;
+                }
+            });
+        }
+
+        FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, mToast.getGravity());
+        contentView.setTranslationX(mToast.getXOffset());
+        contentView.setTranslationY(mToast.getYOffset());
+        container.addView(contentView, layoutParams);
+        return container;
+    }
+
     private final Runnable mCancelRunnable = new Runnable() {
 
         @Override
@@ -214,17 +285,20 @@ final class ToastImpl {
                     return;
                 }
 
-                windowManager.removeViewImmediate(mToast.getView());
+                View windowView = mWindowView != null ? mWindowView : mToast.getView();
+                windowManager.removeViewImmediate(windowView);
 
             } catch (Exception e) {
                 // 如果当前 WindowManager 没有添加这个 View 则会抛出异常
                 // java.lang.IllegalArgumentException: View=android.widget.TextView not attached to window manager
                 e.printStackTrace();
             } finally {
+                HANDLER.removeCallbacks(mAutoCancelRunnable);
                 // 反注册生命周期管控
                 mWindowLifecycle.unregister();
                 // 当前没有显示
                 setShow(false);
+                mWindowView = null;
             }
         }
     };
