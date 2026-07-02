@@ -42,7 +42,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.github.getActivity:Toaster:15.0'
+    implementation 'com.github.AutoFxxk:Toaster:1.0.0'
 }
 ```
 
