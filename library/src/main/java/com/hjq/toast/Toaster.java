@@ -417,6 +417,12 @@ public final class Toaster {
     }
 
     private static CharSequence objectToCharSequence(Object object) {
-        return object != null ? object.toString() : "null";
+        if (object == null) {
+            return null;
+        }
+        if (object instanceof Integer) {
+            return stringIdToCharSequence((Integer) object);
+        }
+        return object.toString();
     }
 }
