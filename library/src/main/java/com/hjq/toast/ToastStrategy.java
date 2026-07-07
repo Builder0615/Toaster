@@ -29,7 +29,7 @@ import java.lang.reflect.Method;
  *    desc   : Toast 默认处理器
  *    doc    : https://developer.android.google.cn/reference/android/widget/Toast
  */
-public class ToastStrategy implements IToastStrategy {
+public class ToastStrategy implements IToastStrategy, Application.ActivityLifecycleCallbacks {
 
     /**
      * 即显即示模式（默认）
@@ -63,6 +63,12 @@ public class ToastStrategy implements IToastStrategy {
     /** 上一个 Toast 显示的时间 */
     private volatile long mLastShowToastMillis;
 
+    /** 当前活跃的 Loading 参数 */
+    private ToastParams mActiveLoadingParams;
+
+    /** 当前活跃的 Loading 超时时间点，0 表示不自动超时 */
+    private long mActiveLoadingTimeoutAt;
+
     public ToastStrategy(Application application) {
         this(application, ToastStrategy.SHOW_STRATEGY_TYPE_IMMEDIATELY);
     }
@@ -70,6 +76,7 @@ public class ToastStrategy implements IToastStrategy {
     public ToastStrategy(Application application, int type) {
         mApplication = application;
         mShowStrategyType = type;
+        mApplication.registerActivityLifecycleCallbacks(this);
         switch (mShowStrategyType) {
             case SHOW_STRATEGY_TYPE_IMMEDIATELY:
             case SHOW_STRATEGY_TYPE_QUEUE:
@@ -90,16 +97,18 @@ public class ToastStrategy implements IToastStrategy {
         final Activity toastActivity = getToastActivity();
 
         IToast toast;
-        if (params.loading &&
-            (params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
-                params.priorityType == ToastParams.PRIORITY_TYPE_GLOBAL) &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            Settings.canDrawOverlays(application)) {
-            toast = new GlobalToast(application);
-        } else if (params.loading && toastActivity != null &&
-            (params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
-                params.priorityType == ToastParams.PRIORITY_TYPE_LOCAL)) {
-            toast = new ActivityToast(toastActivity);
+        if (params.loading) {
+            if (params.priorityType == ToastParams.PRIORITY_TYPE_GLOBAL &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                Settings.canDrawOverlays(application)) {
+                toast = new GlobalToast(application);
+            } else if (toastActivity != null &&
+                (params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
+                    params.priorityType == ToastParams.PRIORITY_TYPE_LOCAL)) {
+                toast = new ActivityToast(toastActivity);
+            } else {
+                return null;
+            }
         } else if ((params.priorityType == ToastParams.PRIORITY_TYPE_DEFAULT ||
             params.priorityType == ToastParams.PRIORITY_TYPE_GLOBAL) &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
@@ -144,11 +153,18 @@ public class ToastStrategy implements IToastStrategy {
 
     @Override
     public void showToast(ToastParams params) {
+        if (params.loading && params != mActiveLoadingParams) {
+            mActiveLoadingParams = params;
+            mActiveLoadingTimeoutAt = params.timeoutMillis > 0 ?
+                SystemClock.uptimeMillis() + params.timeoutMillis : 0;
+        }
         HANDLER.postDelayed(new ShowRunnable(params), getMustShowDelayDuration(params));
     }
 
     @Override
     public void cancelToast() {
+        mActiveLoadingParams = null;
+        mActiveLoadingTimeoutAt = 0;
         long uptimeMillis = SystemClock.uptimeMillis();
         HANDLER.postAtTime(new CancelRunnable(), uptimeMillis);
     }
@@ -283,6 +299,9 @@ public class ToastStrategy implements IToastStrategy {
                 toast.cancel();
             }
             toast = createToast(mToastParams);
+            if (toast == null) {
+                return;
+            }
             // 为什么用 WeakReference，而不用 SoftReference ？
             // https://github.com/getActivity/Toaster/issues/79
             mToastReference = new WeakReference<>(toast);
@@ -389,6 +408,36 @@ public class ToastStrategy implements IToastStrategy {
     protected Application getApplication() {
         return mApplication;
     }
+
+    @Override
+    public void onActivityCreated(Activity activity, android.os.Bundle savedInstanceState) {}
+
+    @Override
+    public void onActivityStarted(Activity activity) {}
+
+    @Override
+    public void onActivityResumed(Activity activity) {
+        if (mActiveLoadingParams == null) {
+            return;
+        }
+        if (mActiveLoadingTimeoutAt > 0 && SystemClock.uptimeMillis() >= mActiveLoadingTimeoutAt) {
+            cancelToast();
+            return;
+        }
+        showToast(mActiveLoadingParams);
+    }
+
+    @Override
+    public void onActivityPaused(Activity activity) {}
+
+    @Override
+    public void onActivityStopped(Activity activity) {}
+
+    @Override
+    public void onActivitySaveInstanceState(Activity activity, android.os.Bundle outState) {}
+
+    @Override
+    public void onActivityDestroyed(Activity activity) {}
 
     /**
      * 获取显示自定义 Toast 的 Activity 对象
