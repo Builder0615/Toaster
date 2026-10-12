@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -183,6 +184,10 @@ final class ToastImpl {
             // WindowInsets.Type.navigationBars()：导航栏
             // WindowInsets.Type.ime()：输入法（软键盘）
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Loading 是全屏窗口，但遮罩和内容都应避开系统栏及刘海安全区。
+                params.setFitInsetsTypes(WindowInsets.Type.statusBars()
+                    | WindowInsets.Type.navigationBars()
+                    | WindowInsets.Type.displayCutout());
                 params.setFitInsetsIgnoringVisibility(true);
             }
 

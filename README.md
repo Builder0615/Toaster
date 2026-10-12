@@ -42,7 +42,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.github.AutoFxxk:Toaster:1.0.3'
+    implementation 'com.github.AutoFxxk:Toaster:1.0.4'
 }
 ```
 
