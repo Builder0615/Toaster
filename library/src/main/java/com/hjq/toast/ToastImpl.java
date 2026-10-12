@@ -178,6 +178,16 @@ final class ToastImpl {
             params.windowAnimations = mToast.getAnimationsId();
             params.setTitle(WINDOW_TITLE);
 
+            // Loading 窗口会获取焦点，需沿用 Activity 的系统栏图标样式，避免状态栏外观被重置。
+            if (mToast.isFillScreen() && mToast.getContext() instanceof Activity) {
+                Activity activity = (Activity) mToast.getContext();
+                params.systemUiVisibility = activity.getWindow().getDecorView().getSystemUiVisibility();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP &&
+                    (activity.getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS) != 0) {
+                    params.flags |= WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS;
+                }
+            }
+
             // 指定 WindowManager 忽略系统窗口可见性的影响
             // 例如下面这些的显示和隐藏都会影响当前 WindowManager 的显示（触发位置调整）
             // WindowInsets.Type.statusBars()：状态栏
