@@ -21,6 +21,7 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  *    author : Android 轮子哥
@@ -68,6 +69,9 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
 
     /** 当前活跃的 Loading 超时时间点，0 表示不自动超时 */
     private long mActiveLoadingTimeoutAt;
+
+    /** Loading 请求序号，用于丢弃它之前排队的 Toast */
+    private final AtomicLong mLoadingRequestSequence = new AtomicLong();
 
     public ToastStrategy(Application application) {
         this(application, ToastStrategy.SHOW_STRATEGY_TYPE_IMMEDIATELY);
@@ -153,12 +157,18 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
 
     @Override
     public void showToast(ToastParams params) {
+        long loadingRequestSequence = mLoadingRequestSequence.get();
         if (params.loading && params != mActiveLoadingParams) {
             mActiveLoadingParams = params;
             mActiveLoadingTimeoutAt = params.timeoutMillis > 0 ?
                 SystemClock.uptimeMillis() + params.timeoutMillis : 0;
         }
-        HANDLER.postDelayed(new ShowRunnable(params), getMustShowDelayDuration(params));
+        if (params.loading) {
+            loadingRequestSequence = mLoadingRequestSequence.incrementAndGet();
+            // Loading 应立即抢占当前 Toast，避免等待 Loading 自己的显示延迟。
+            HANDLER.postAtTime(new CancelRunnable(), SystemClock.uptimeMillis());
+        }
+        HANDLER.postDelayed(new ShowRunnable(params, loadingRequestSequence), getMustShowDelayDuration(params));
     }
 
     @Override
@@ -241,21 +251,30 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     private class ShowRunnable implements Runnable {
 
         private final ToastParams mToastParams;
+        private final long mLoadingSequence;
 
-        private ShowRunnable(ToastParams params) {
+        private ShowRunnable(ToastParams params, long loadingRequestSequence) {
             mToastParams = params;
+            mLoadingSequence = loadingRequestSequence;
         }
 
         @Override
         public void run() {
+            if (mLoadingSequence != ToastStrategy.this.mLoadingRequestSequence.get()) {
+                return;
+            }
             switch (mShowStrategyType) {
                 case SHOW_STRATEGY_TYPE_IMMEDIATELY: {
                     // 移除之前未显示的 Toast 消息
                     long uptimeMillis = SystemClock.uptimeMillis() + mToastParams.delayMillis + getBestShowDelayDuration(mToastParams);
-                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams), uptimeMillis);
+                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mLoadingSequence), uptimeMillis);
                     break;
                 }
                 case SHOW_STRATEGY_TYPE_QUEUE: {
+                    if (mToastParams.loading) {
+                        // Loading 不等待它之前排队的普通 Toast。
+                        mLastShowToastMillis = 0;
+                    }
                     // 计算出这个 Toast 显示时间
                     long showToastMillis =
                         SystemClock.uptimeMillis() + mToastParams.delayMillis + getBestShowDelayDuration(mToastParams);
@@ -263,10 +282,10 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
                     long waitMillis = generateToastWaitMillis(mToastParams);
                     // 如果当前显示的时间在上一个 Toast 的显示范围之内
                     // 那么就重新计算 Toast 的显示时间
-                    if (showToastMillis < (mLastShowToastMillis + waitMillis)) {
+                    if (!mToastParams.loading && showToastMillis < (mLastShowToastMillis + waitMillis)) {
                         showToastMillis = mLastShowToastMillis + waitMillis;
                     }
-                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams), showToastMillis);
+                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mLoadingSequence), showToastMillis);
                     mLastShowToastMillis = showToastMillis;
                     break;
                 }
@@ -282,13 +301,18 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     private class ShowToastRunnable implements Runnable {
 
         private final ToastParams mToastParams;
+        private final long mLoadingSequence;
 
-        private ShowToastRunnable(ToastParams params) {
+        private ShowToastRunnable(ToastParams params, long loadingRequestSequence) {
             mToastParams = params;
+            mLoadingSequence = loadingRequestSequence;
         }
 
         @Override
         public void run() {
+            if (mLoadingSequence != ToastStrategy.this.mLoadingRequestSequence.get()) {
+                return;
+            }
             IToast toast = null;
             if (mToastReference != null) {
                 toast = mToastReference.get();
