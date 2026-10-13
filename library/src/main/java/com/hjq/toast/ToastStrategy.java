@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.view.Choreographer;
 import android.view.View;
 import android.widget.Toast;
 import com.hjq.toast.config.IToast;
@@ -58,6 +59,9 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     /** Toast 对象 */
     private WeakReference<IToast> mToastReference;
 
+    /** 等待下一帧显示的 Toast 任务 */
+    private ShowToastRunnable mPendingShowToastRunnable;
+
     /** 吐司显示策略 */
     private final int mShowStrategyType;
 
@@ -70,8 +74,8 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     /** 当前活跃的 Loading 超时时间点，0 表示不自动超时 */
     private long mActiveLoadingTimeoutAt;
 
-    /** Loading 请求序号，用于丢弃它之前排队的 Toast */
-    private final AtomicLong mLoadingRequestSequence = new AtomicLong();
+    /** 请求序号，用于在 Loading 抢占或取消时丢弃旧的显示任务 */
+    private final AtomicLong mToastRequestSequence = new AtomicLong();
 
     public ToastStrategy(Application application) {
         this(application, ToastStrategy.SHOW_STRATEGY_TYPE_IMMEDIATELY);
@@ -157,24 +161,27 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
 
     @Override
     public void showToast(ToastParams params) {
-        long loadingRequestSequence = mLoadingRequestSequence.get();
+        long toastRequestSequence = mToastRequestSequence.get();
         if (params.loading && params != mActiveLoadingParams) {
             mActiveLoadingParams = params;
             mActiveLoadingTimeoutAt = params.timeoutMillis > 0 ?
                 SystemClock.uptimeMillis() + params.timeoutMillis : 0;
         }
         if (params.loading) {
-            loadingRequestSequence = mLoadingRequestSequence.incrementAndGet();
+            toastRequestSequence = mToastRequestSequence.incrementAndGet();
             // Loading 应立即抢占当前 Toast，避免等待 Loading 自己的显示延迟。
             HANDLER.postAtTime(new CancelRunnable(), SystemClock.uptimeMillis());
         }
-        HANDLER.postDelayed(new ShowRunnable(params, loadingRequestSequence), getMustShowDelayDuration(params));
+        HANDLER.postDelayed(new ShowRunnable(params, toastRequestSequence), getMustShowDelayDuration(params));
     }
 
     @Override
     public void cancelToast() {
         mActiveLoadingParams = null;
         mActiveLoadingTimeoutAt = 0;
+        // dismiss 也应取消尚未显示、包括正在等待下一帧的 Toast。
+        mToastRequestSequence.incrementAndGet();
+        mLastShowToastMillis = 0;
         long uptimeMillis = SystemClock.uptimeMillis();
         HANDLER.postAtTime(new CancelRunnable(), uptimeMillis);
     }
@@ -251,23 +258,23 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     private class ShowRunnable implements Runnable {
 
         private final ToastParams mToastParams;
-        private final long mLoadingSequence;
+        private final long mRequestSequence;
 
-        private ShowRunnable(ToastParams params, long loadingRequestSequence) {
+        private ShowRunnable(ToastParams params, long toastRequestSequence) {
             mToastParams = params;
-            mLoadingSequence = loadingRequestSequence;
+            mRequestSequence = toastRequestSequence;
         }
 
         @Override
         public void run() {
-            if (mLoadingSequence != ToastStrategy.this.mLoadingRequestSequence.get()) {
+            if (mRequestSequence != ToastStrategy.this.mToastRequestSequence.get()) {
                 return;
             }
             switch (mShowStrategyType) {
                 case SHOW_STRATEGY_TYPE_IMMEDIATELY: {
                     // 移除之前未显示的 Toast 消息
                     long uptimeMillis = SystemClock.uptimeMillis() + mToastParams.delayMillis + getBestShowDelayDuration(mToastParams);
-                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mLoadingSequence), uptimeMillis);
+                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mRequestSequence), uptimeMillis);
                     break;
                 }
                 case SHOW_STRATEGY_TYPE_QUEUE: {
@@ -285,7 +292,7 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
                     if (!mToastParams.loading && showToastMillis < (mLastShowToastMillis + waitMillis)) {
                         showToastMillis = mLastShowToastMillis + waitMillis;
                     }
-                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mLoadingSequence), showToastMillis);
+                    HANDLER.postAtTime(new ShowToastRunnable(mToastParams, mRequestSequence), showToastMillis);
                     mLastShowToastMillis = showToastMillis;
                     break;
                 }
@@ -301,28 +308,47 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
     private class ShowToastRunnable implements Runnable {
 
         private final ToastParams mToastParams;
-        private final long mLoadingSequence;
+        private final long mRequestSequence;
 
-        private ShowToastRunnable(ToastParams params, long loadingRequestSequence) {
+        private ShowToastRunnable(ToastParams params, long toastRequestSequence) {
             mToastParams = params;
-            mLoadingSequence = loadingRequestSequence;
+            mRequestSequence = toastRequestSequence;
         }
 
         @Override
         public void run() {
-            if (mLoadingSequence != ToastStrategy.this.mLoadingRequestSequence.get()) {
+            if (mRequestSequence != ToastStrategy.this.mToastRequestSequence.get()) {
                 return;
             }
-            IToast toast = null;
-            if (mToastReference != null) {
-                toast = mToastReference.get();
-            }
 
-            if (toast != null) {
-                // 取消上一个 Toast 的显示，避免出现重叠的效果
-                toast.cancel();
+            cancelCurrentToast();
+            mPendingShowToastRunnable = this;
+            final Runnable showRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (mPendingShowToastRunnable != ShowToastRunnable.this ||
+                        mRequestSequence != ToastStrategy.this.mToastRequestSequence.get()) {
+                        return;
+                    }
+                    mPendingShowToastRunnable = null;
+                    createAndShowToast();
+                }
+            };
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                Choreographer.getInstance().postFrameCallback(new Choreographer.FrameCallback() {
+                    @Override
+                    public void doFrame(long frameTimeNanos) {
+                        // 等本帧的旧窗口布局更新、移除完成后，再创建新的窗口。
+                        HANDLER.post(showRunnable);
+                    }
+                });
+            } else {
+                HANDLER.postDelayed(showRunnable, 16);
             }
-            toast = createToast(mToastParams);
+        }
+
+        private void createAndShowToast() {
+            IToast toast = createToast(mToastParams);
             if (toast == null) {
                 return;
             }
@@ -337,6 +363,15 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
             }
             applyToastContent(toast, mToastParams);
             toast.show();
+        }
+    }
+
+    private void cancelCurrentToast() {
+        mPendingShowToastRunnable = null;
+        IToast toast = mToastReference != null ? mToastReference.get() : null;
+        mToastReference = null;
+        if (toast != null) {
+            toast.cancel();
         }
     }
 
@@ -356,15 +391,7 @@ public class ToastStrategy implements IToastStrategy, Application.ActivityLifecy
 
         @Override
         public void run() {
-            IToast toast = null;
-            if (mToastReference != null) {
-                toast = mToastReference.get();
-            }
-
-            if (toast == null) {
-                return;
-            }
-            toast.cancel();
+            cancelCurrentToast();
         }
     }
 

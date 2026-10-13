@@ -101,11 +101,11 @@ final class ToastImpl {
      * 取消吐司弹窗
      */
     void cancel() {
+        HANDLER.removeCallbacks(mShowRunnable);
+        HANDLER.removeCallbacks(mAutoCancelRunnable);
         if (!isShow()) {
             return;
         }
-        HANDLER.removeCallbacks(mShowRunnable);
-        HANDLER.removeCallbacks(mAutoCancelRunnable);
         if (isMainThread()) {
             mCancelRunnable.run();
         } else {
@@ -293,6 +293,9 @@ final class ToastImpl {
 
         @Override
         public void run() {
+            if (!isShow()) {
+                return;
+            }
 
             try {
                 WindowManager windowManager = mWindowLifecycle.getWindowManager();
@@ -301,7 +304,18 @@ final class ToastImpl {
                 }
 
                 View windowView = mWindowView != null ? mWindowView : mToast.getView();
-                windowManager.removeViewImmediate(windowView);
+                windowView.clearAnimation();
+                windowView.animate().cancel();
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) windowView.getLayoutParams();
+                params.windowAnimations = 0;
+                params.alpha = 0;
+                try {
+                    windowManager.updateViewLayout(windowView, params);
+                } finally {
+                    // 先让布局更新把透明度和无动画参数交给系统，再移除窗口。
+                    // removeViewImmediate 会跳过这次更新，系统仍可能播放旧的退出动画。
+                    windowManager.removeView(windowView);
+                }
 
             } catch (Exception e) {
                 // 如果当前 WindowManager 没有添加这个 View 则会抛出异常
