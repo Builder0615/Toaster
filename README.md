@@ -42,7 +42,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.github.Builder0615:Toaster:1.0.5'
+    implementation 'com.github.Builder0615:Toaster:1.0.6'
 }
 ```
 

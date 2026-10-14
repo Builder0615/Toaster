@@ -30,6 +30,15 @@ final class ToastImpl {
 
     private static final String WINDOW_TITLE = "Toast";
 
+    /** 等待窗口首次布局的最大帧数，超过后直接显示，避免极端情况下吐司一直不显示 */
+    private static final int MAX_LAYOUT_WAIT_FRAMES = 10;
+
+    /** 窗口完成首次布局后额外等待的帧数，用于等待系统应用 gravity 对应的最终位置 */
+    private static final int WAIT_FRAMES_AFTER_LAYOUT = 1;
+
+    /** 首帧门控结束之后，吐司淡入显示的时长 */
+    private static final long FADE_IN_DURATION_MILLIS = 200;
+
     private static final Handler HANDLER = new Handler(Looper.getMainLooper());
 
     /** 当前的吐司对象 */
@@ -175,7 +184,11 @@ final class ToastImpl {
             params.y = mToast.isFillScreen() ? 0 : mToast.getYOffset();
             params.verticalMargin = mToast.isFillScreen() ? 0 : mToast.getVerticalMargin();
             params.horizontalMargin = mToast.isFillScreen() ? 0 : mToast.getHorizontalMargin();
-            params.windowAnimations = mToast.getAnimationsId();
+            // 不使用系统的窗口进入动画：在窗口状态不稳定时（例如 Activity 切换、从系统页面返回），
+            // 新窗口可能会先被放在左上角，而位置修正会被推迟到进入动画结束才生效，
+            // 最终表现为吐司先在左上角淡入、再跳到重力位置。
+            // 这里改为先以透明状态添加窗口，等布局稳定后再由框架自己执行淡入。
+            params.windowAnimations = 0;
             params.setTitle(WINDOW_TITLE);
 
             // Loading 窗口会获取焦点，需沿用 Activity 的系统栏图标样式，避免状态栏外观被重置。
@@ -217,7 +230,10 @@ final class ToastImpl {
 
             try {
                 mWindowView = createWindowView();
+                // 先以完全透明的方式添加窗口，等窗口完成首次布局、系统修正到最终位置后再淡入显示
+                mWindowView.setAlpha(0f);
                 windowManager.addView(mWindowView, params);
+                revealWindowViewAfterLayout();
                 if (mWindowView.isFocusable()) {
                     mWindowView.requestFocus();
                 }
@@ -244,6 +260,71 @@ final class ToastImpl {
             }
         }
     };
+
+    /**
+     * 等窗口完成首次布局、系统应用 gravity 位置之后，再把吐司淡入显示。
+     *
+     * 在窗口状态不稳定时（例如 Activity 切换、从系统页面返回），WindowManager 可能会先把
+     * 新添加的窗口放在左上角，之后才修正到 gravity 对应的位置。如果此时窗口已经可见，
+     * 用户就会看到吐司先在左上角出现、再跳到屏幕中间；这里先以透明状态添加窗口，
+     * 等首帧布局稳定后再显示，保证用户看到的第一个画面就在正确位置上。
+     */
+    private void revealWindowViewAfterLayout() {
+        final View windowView = mWindowView;
+        if (windowView == null) {
+            return;
+        }
+        postOnAnimation(windowView, new Runnable() {
+
+            /** 从添加窗口开始一共等待了多少帧 */
+            private int mWaitFrames;
+
+            /** 首次布局完成之后又等待了多少帧 */
+            private int mFramesAfterLayout;
+
+            @Override
+            public void run() {
+                // 窗口已经被取消或者已经被替换，不再继续等待
+                if (windowView != mWindowView) {
+                    return;
+                }
+
+                mWaitFrames++;
+                // 窗口还没有附着到 WindowManager 时，getWindowToken 会返回空，这里继续等待
+                boolean laidOut = windowView.getWindowToken() != null &&
+                        windowView.getWidth() > 0 && windowView.getHeight() > 0;
+                if (laidOut) {
+                    mFramesAfterLayout++;
+                }
+
+                // 等待窗口完成首次布局，布局完成后再多等一帧，让系统把 gravity 的最终位置应用上；
+                // 极端情况下最多等待 MAX_LAYOUT_WAIT_FRAMES 帧，避免吐司因为等不到布局一直不显示
+                if (mWaitFrames < MAX_LAYOUT_WAIT_FRAMES &&
+                        (!laidOut || mFramesAfterLayout <= WAIT_FRAMES_AFTER_LAYOUT)) {
+                    postOnAnimation(windowView, this);
+                    return;
+                }
+
+                if (mToast.getAnimationsId() == 0) {
+                    // 外部主动关闭了动画，直接显示
+                    windowView.setAlpha(1f);
+                } else {
+                    windowView.animate().alpha(1f).setDuration(FADE_IN_DURATION_MILLIS).start();
+                }
+            }
+        });
+    }
+
+    /**
+     * {@link View#postOnAnimation(Runnable)} 需要 Android 4.1 及以上版本
+     */
+    private static void postOnAnimation(View view, Runnable runnable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            view.postOnAnimation(runnable);
+        } else {
+            view.postDelayed(runnable, 16);
+        }
+    }
 
     private long generateAutoCancelDelay() {
         if (mToast.getTimeoutMillis() > 0) {
